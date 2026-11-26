@@ -26,6 +26,7 @@ const sent = atom({ plugin: 'oliviaos-guard', key: 'sent' } as const, 0, { shape
 const tieredCount = atom({ plugin: 'oliviaos-guard', key: 'tiered' } as const, 0, { shape: 'n-1' })
 const blocked = atom({ plugin: 'oliviaos-guard', key: 'blocked' } as const, 0, { shape: 'n-1' })
 const mapLoaded = atom({ plugin: 'oliviaos-guard', key: 'mapLoaded' } as const, false, { shape: 'b-1' })
+const caveman = atom({ plugin: 'oliviaos-guard', key: 'caveman' } as const, true, { shape: 'b-1' })
 const mapNoted = atom({ plugin: 'oliviaos-guard', key: 'mapNoted' } as const, [] as string[], { shape: 's-1' })
 
 export const CARRY =
@@ -262,6 +263,33 @@ export function hostNames(result: string): string[] {
 
 const INFRA_GET = /^mcp__.+__infra_get$/
 
+// ---------- caveman voice ----------
+
+// Condensed from the caveman skill (github.com/JuliusBrussee/caveman), so sessions without the skill get it too.
+export const CAVEMAN =
+  'OliviaOS voice (enforced by the oliviaos-guard mod): use caveman everywhere you talk: chat replies, status lines ' +
+  'and recaps, report_work and ask_olivia entries, messages to other agents or sessions, subagent and session briefs ' +
+  'and their reports. Answer first, then reason, then next step. No greetings, hedging, filler, recaps or closers. ' +
+  'Short words. Articles optional, but never drop not, never, no, only or except. One idea per sentence. Keep code, ' +
+  "commands, paths, numbers and quoted errors exact. Use the user's language. Write normal full sentences for: " +
+  'security warnings; irreversible steps; step order that could be misread; questions to the user; anything saved or ' +
+  'sent outside chat (code, comments, commits, docs, PRs, issues, memory files, and every message to other people, ' +
+  'such as email or job applications). Off only when Olivia says "stop caveman" or "normal mode"; "/caveman" turns it ' +
+  'back on.'
+
+export const CAVEMAN_REMINDER = 'Caveman voice (OliviaOS): terse, answer first, every fact kept. Full sentences only where the voice rule says so.'
+
+/** Her own words that switch the voice: false = off, true = on, undefined = no switch. */
+export function caveSwitch(text: string): boolean | undefined {
+  const t = text.trim()
+  if (/^(ok(ay)?[, ]+|please )?(stop caveman|normal mode)\b.{0,30}$/i.test(t)) return false
+  if (/^(\/caveman(:caveman)?|caveman mode|talk like caveman)\b.{0,30}$/i.test(t)) return !/\b(off|status)\b/i.test(t) ? true : /\boff\b/i.test(t) ? false : undefined
+  return undefined
+}
+
+// Only she may switch it: not another session, a task notice or a plugin.
+const HERS = ['composer', 'bridge', 'sdk', 'projects-relay']
+
 // ---------- hooks ----------
 
 let cwd = ''
@@ -390,15 +418,22 @@ export const register: Register = on => {
     lastPromptAt = Date.now()
     turnLogged = 0
     turnBlocked = 0
+    const origin = (e as any).origin?.kind
+    if (!e.isMeta && (origin === undefined || HERS.includes(origin))) {
+      const to = caveSwitch(e.text)
+      if (to !== undefined) await update($, caveman, () => to)
+    }
+    const add: string[] = []
     // No network here: the names come from the plugin's own store.
     if (!e.isMeta && !e.command) {
+      if (await read($, caveman)) add.push(CAVEMAN_REMINDER)
       const names = ((await $.store.get('infraNames')) as string[] | undefined) ?? []
       if (mentionsInfra(e.text, names)) {
         infraTurn = true
-        if (!(await read($, mapLoaded))) return next({ ...e, context: [...(e.context ?? []), INFRA_REMINDER] })
+        if (!(await read($, mapLoaded))) add.push(INFRA_REMINDER)
       }
     }
-    return next(e)
+    return next(add.length ? { ...e, context: [...(e.context ?? []), ...add] } : e)
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
@@ -487,6 +522,7 @@ export const register: Register = on => {
     if (!rulesFromMcp && Date.now() - rulesTriedAt > 10_000) void loadRules($).then(t => { if (t) liveRules = t }).catch(() => {})
     const extra = [{ id: 'oliviaos-guard:autonomy', text: AUTONOMY, scope: 'session' as const }]
     if (liveRules) extra.push({ id: 'oliviaos-guard:rules', text: `# OliviaOS rules (live, from the OliviaOS skill's rules_get)\n\n${liveRules}`, scope: 'session' as const })
+    if (await read($, caveman)) extra.push({ id: 'oliviaos-guard:caveman', text: CAVEMAN, scope: 'session' as const })
     if (isNight(helsinkiHour())) extra.push({ id: 'oliviaos-guard:night', text: awakeNow() ? `${NIGHT} Olivia is chatting right now, so a plain factual question is fine; approvals still wait for the morning.` : NIGHT, scope: 'session' as const })
     return { ...r, sections: [...r.sections, ...extra] }
   }).catch(($, e, next) => next(e))

@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { isPermissionAsk, boxVerdict, mentionsInfra, hostNames, INFRA_REMINDER, turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
+import { caveSwitch, CAVEMAN_REMINDER, isPermissionAsk, boxVerdict, mentionsInfra, hostNames, INFRA_REMINDER, turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
 
 const DAY = 14
 const NIGHT = 2
@@ -205,9 +205,9 @@ test('an infra prompt gets the reminder until the map is loaded', async ($, on) 
   await $.prompt.submit({ text: 'rename this variable' } as any)
   await $.tool.call({ tool: 'mcp__claude_ai_oliviaos__infra_get' } as any)
   await $.prompt.submit({ text: 'is the server up?' } as any)
-  expect(seen[0]).toEqual([INFRA_REMINDER])
-  expect(seen[1]).toEqual([])
-  expect(seen[2]).toEqual([])
+  expect(seen[0]).toEqual([CAVEMAN_REMINDER, INFRA_REMINDER])
+  expect(seen[1]).toEqual([CAVEMAN_REMINDER])
+  expect(seen[2]).toEqual([CAVEMAN_REMINDER])
 })
 
 test('an infra answer without the map is recorded once, without the prompt', async ($, on) => {
@@ -255,4 +255,25 @@ test('the next-step box refuses a permission question and passes a plain recap',
   expect(ran).toBe(0)
   await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: 'done' } as any)
   expect(ran).toBe(1)
+})
+
+
+test('only a plain switch phrase turns caveman off or on', async () => {
+  for (const p of ['stop caveman', 'Normal mode.', 'ok, stop caveman please', '/caveman off']) expect(caveSwitch(p)).toBe(false)
+  for (const p of ['/caveman', 'caveman mode', 'talk like caveman']) expect(caveSwitch(p)).toBe(true)
+  for (const p of ['add a stop caveman switch to the guard', 'make them use caveman in everything', 'vim has a normal mode and an insert mode', '/caveman status']) expect(caveSwitch(p)).toBe(undefined)
+})
+
+test('her stop turns the reminder off, another session cannot', async ($, on) => {
+  const seen: any[] = []
+  on('prompt.submit', (_, e: any) => { seen.push(e.context ?? []); return { text: e.text } })
+  on('store.get', () => ({ value: undefined }))
+  await $.prompt.submit({ text: 'stop caveman', origin: { kind: 'peer' } } as any)
+  await $.prompt.submit({ text: 'hello' } as any)
+  await $.prompt.submit({ text: 'stop caveman' } as any)
+  await $.prompt.submit({ text: 'hello' } as any)
+  await $.prompt.submit({ text: 'caveman mode' } as any)
+  expect(seen[1]).toEqual([CAVEMAN_REMINDER])
+  expect(seen[3]).toEqual([])
+  expect(seen[4]).toEqual([CAVEMAN_REMINDER])
 })

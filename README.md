@@ -10,6 +10,7 @@ Turns the OliviaOS Rule (`~/.oliviaos/RULES.md`) from text into hooks, so no ses
 - **Status line**: `OliviaOS · N logged · N sent · M blocked · night`.
 - **Autonomy, always**: a system-prompt section tells every session to decide reversible work itself. A question to Olivia (AskUserQuestion, blocking `ask_olivia`) that asks permission is refused unless it starts with `IRREVERSIBLE+LIVE:` and says why no backup is possible. Blocking `ask_olivia` with a `default_action` is turned non-blocking.
 - **Next-step box and yes/no questions**: a `wrap_up` question or `AskUserQuestion` whose answers are yes / no (or that asks permission in words) is refused unless it starts with `IRREVERSIBLE+LIVE:`. Questions about sending, paying or permanent deletion pass. Plain closing text cannot be blocked.
+- **Caveman voice, everywhere**: every session gets the voice rule in its system prompt and a one-line reminder with each prompt: chat, recaps, reports, agent briefs. Full sentences stay for warnings, irreversible steps, questions, and anything saved or sent to other people. `stop caveman` / `normal mode` from the user turns it off for the session, `/caveman` turns it on.
 - **Night guard, 23:00–08:00 Helsinki**: AskUserQuestion, PushNotification and blocking `ask_olivia` are refused. Proactive file sends go quietly. A night section in the system prompt says: decide yourself, contain only (stop, pause, roll back), hold real decisions for the ~10:00 report.
 
 ## Install

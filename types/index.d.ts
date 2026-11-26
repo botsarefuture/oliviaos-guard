@@ -7,6 +7,7 @@ declare module 'claude-code' {
       sent: Shaped<number>
       mapLoaded: Shaped<boolean>
       mapNoted: Shaped<string[]>
+      caveman: Shaped<boolean>
       pending: Shaped<{ title: string; summary: string; what: string; project: string }[]>
     }
   }
