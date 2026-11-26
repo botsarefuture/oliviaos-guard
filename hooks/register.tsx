@@ -47,15 +47,28 @@ export function helsinkiHour(now: Date = new Date()): number {
 
 export const isNight = (hour: number) => hour >= 23 || hour < 8
 
+/**
+ * Drops text that is a message, not a command: commit/PR/log messages and
+ * heredoc bodies. Without this, writing ABOUT a hard stop gets blocked.
+ */
+export function commandPart(cmd: string): string {
+  return cmd
+    .replace(/<<-?\s*['"]?(\w+)['"]?[\s\S]*?\n\1\b/g, ' ')
+    .replace(/(\.oliviaos\/scripts\/log)((?:\s+(?:"(?:[^"\\]|\\.)*"|'[^']*'))+)/g, '$1')
+    .replace(/(\s(?:-m|--message|--body|--title|--description|-f\s+message=|-f\s+body=|-f\s+title=))\s*(?:"(?:[^"\\]|\\.)*"|'[^']*')/g, '$1 MSG')
+    .replace(/(\s(?:-m|--message|--body|--title|-f\s+message=))\s*"\$\(cat[\s\S]*?\)"/g, '$1 MSG')
+}
+
 /** Returns a deny reason when the command hits a HARD STOP, else undefined. */
-export function hardStop(cmd: string, hour: number): string | undefined {
+export function hardStop(rawCmd: string, hour: number): string | undefined {
+  const cmd = commandPart(rawCmd)
   // Reading is fine (ls, cat, stat, grep). Opening the db or writing into the folder is what locked pmxcfs.
   if (/\/var\/lib\/pve-cluster\//.test(cmd) && SSH.test(cmd) && PVE_TOUCH.test(cmd))
     return 'HARD STOP: never open or write /var/lib/pve-cluster/*.db live (2026-11-20 sqlite lock caused a cluster outage). Reading the folder (ls, stat) is fine. Use Proxmox tooling (vzdump, pvesh, qm config) instead.'
 
   // pkill -f over SSH matches the remote shell that carries the pattern, so it kills its own session.
   // A bracketed pattern ('[n]ode') cannot match itself and is safe.
-  const pk = /\bpkill\s+(?:-\S+\s+)*?-\S*f\S*\s+(?:-\S+\s+)*['"]?([^\s'";&|]+)/.exec(cmd)
+  const pk = /\bpkill\s+(?:-[a-zA-Z]+\s+)*?-[a-zA-Z]*f[a-zA-Z]*\s+(?:-[a-zA-Z]+\s+)*['"]?([^\s'";&|()]+)/.exec(cmd)
   const pat = pk?.[1] ?? ''
   if (SSH.test(cmd) && pat && !/\[[^\]]+\]/.test(pat))
     return `HARD STOP: \`pkill -f ${pat}\` over SSH also matches the remote shell running it and kills your own session. Use a bracketed pattern that cannot match itself (pkill -f '[${pat.slice(0, 1)}]${pat.slice(1)}'), a PID from pgrep -a, or systemctl stop <unit>.`
@@ -195,6 +208,7 @@ async function refuse($: EngineInterface, why: string, what: string) {
     summary: `oliviaos-guard blocked this (secrets redacted). Nothing ran.\n\nWhat: ${w}\n\nWhy: ${why}`,
   })
   await refresh($)
+  $.ui.toast(`OliviaOS guard blocked: ${w.slice(0, 80)}`)
   return { deny: `oliviaos-guard: ${why}` }
 }
 
@@ -342,4 +356,22 @@ export const register: Register = on => {
   on('tool.call', { tool: 'SendUserFile' }, async ($, e, next) =>
     isNight(helsinkiHour()) && !awakeNow() && e.status === 'proactive' ? next({ ...e, status: 'normal' }) : next(e),
   ).catch(($, e, next) => next(e))
+
+  // 7: a row above the prompt, since the desktop app draws no status line.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey) return next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    const n = await read($, logged)
+    const b = await read($, blocked)
+    const s = await read($, sent)
+    const q = (await read($, pending)).length
+    const night = isNight(helsinkiHour())
+    return (
+      <Box>
+        <Text dimColor>
+          OliviaOS guard on · {n} logged · {s} sent{q > 0 ? ` (${q} queued)` : ''} · {b} blocked{night ? ' · night' : ''}
+        </Text>
+      </Box>
+    )
+  }).catch(($, e, next) => next(e))
 }
