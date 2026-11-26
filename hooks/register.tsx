@@ -196,10 +196,20 @@ export function withTier(e: any): any {
   return e
 }
 
+/** One quiet line for the end of a reply, or '' when the guard did nothing this turn. */
+export function turnSummary(nLogged: number, nBlocked: number): string {
+  const parts: string[] = []
+  if (nLogged > 0) parts.push(`${nLogged} logged`)
+  if (nBlocked > 0) parts.push(`${nBlocked} blocked`)
+  return parts.length ? `— OliviaOS guard: ${parts.join(' · ')} this turn (decisions.md + OliviaOS inbox)` : ''
+}
+
 // ---------- hooks ----------
 
 let cwd = ''
 let lastPromptAt = 0
+let turnLogged = 0
+let turnBlocked = 0
 let liveRules = ''
 let rulesFromMcp = false
 let rulesTriedAt = 0
@@ -243,6 +253,7 @@ async function record($: EngineInterface, r: { title: string; what: string; cls:
 
 async function refuse($: EngineInterface, why: string, what: string) {
   await update($, blocked, n => n + 1)
+  turnBlocked += 1
   const w = redact(what).replace(/\s+/g, ' ').slice(0, 300)
   await record($, {
     title: `[blocked] ${w}`,
@@ -318,6 +329,8 @@ async function flush($: EngineInterface) {
 export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     lastPromptAt = Date.now()
+    turnLogged = 0
+    turnBlocked = 0
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -340,6 +353,7 @@ export const register: Register = on => {
       try {
         const what = redact(e.description ? `${e.description}: ${cmd}` : cmd).replace(/\s+/g, ' ').slice(0, 300)
         await update($, logged, n => n + 1)
+        turnLogged += 1
         await record($, {
           title: `[auto] ${what}`,
           what,
@@ -405,4 +419,14 @@ export const register: Register = on => {
     isNight(helsinkiHour()) && !awakeNow() && e.status === 'proactive' ? next({ ...e, status: 'normal' }) : next(e),
   ).catch(($, e, next) => next(e))
 
+
+  // 7: plain-text fallback. Project and cloud threads draw no status line, so a turn
+  // in which the guard logged or blocked something ends with one line saying so.
+  on('turn.complete', async ($, e, next) => {
+    const r = await next(e)
+    const line = turnSummary(turnLogged, turnBlocked)
+    turnLogged = 0
+    turnBlocked = 0
+    return line && typeof r.text === 'string' ? { ...r, text: `${r.text}\n\n${line}` } : r
+  }).catch(($, e, next) => next(e))
 }

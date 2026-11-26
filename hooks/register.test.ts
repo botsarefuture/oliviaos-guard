@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
+import { turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
 
 const DAY = 14
 const NIGHT = 2
@@ -153,3 +153,24 @@ test('writing about a hard stop is not a hard stop', async () => {
   expect(hardStop(`git commit -m "x" && ss` + `h h 'pki` + `ll -f node'`, 14)).toMatch(/HARD STOP/)
 })
 
+
+test('a turn where the guard acted ends with one plain line', async () => {
+  expect(turnSummary(0, 0)).toBe('')
+  expect(turnSummary(2, 1)).toMatch(/OliviaOS guard: 2 logged · 1 blocked this turn/)
+})
+
+test('the reply gets the guard line after a block', async ($, on) => {
+  on('tool.call', () => ({ result: {} }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('env.get', () => ({ value: '/Users/x' }))
+  on('mcp.call', () => ({ value: { content: [], isError: false } }))
+  on('prompt.submit', (_, e: any) => ({ text: e.text }))
+  on('turn.complete', () => ({ text: 'Done.' }))
+  on('ui.log', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.status', () => ({ value: undefined }))
+  await $.prompt.submit({ text: 'go' } as any)
+  await $.tool.call({ tool: 'Bash', command: "ss" + "h h 'pk" + "ill -f sshd'" } as any)
+  const r: any = await $.turn.complete({ reason: 'answer', answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't1' } as any)
+  expect(r.text).toMatch(/Done\.\n\n— OliviaOS guard: 1 blocked/)
+})
