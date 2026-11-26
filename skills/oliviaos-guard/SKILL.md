@@ -22,6 +22,7 @@ the OliviaOS connector's `rules_get` and are in your system prompt.
   to…") is refused unless it starts with `IRREVERSIBLE+LIVE:`.
 - **Night guard, 23:00–08:00 Helsinki:** no questions, no phone notifications, no
   blocking `ask_olivia`. A factual question is allowed while Olivia is chatting.
+- **Infra map first:** an infrastructure prompt gets a reminder to call `infra_get` (and `infra_observed` for live facts) before answering or acting; never answer infra questions from memory. It never blocks. The log records whether the map was loaded.
 - **Model tiering:** an `Agent` or `start_session` call with no model gets the cheapest that fits: Haiku for read-only work (search, read, status, summaries, Explore), Sonnet by default, and no change (inherits) for architecture, security/auth, planning or hard debugging. A model you set is never changed; forks are left alone.
 - **Briefs:** adds the OliviaOS carry-forward line to every subagent and session
   brief that lacks it.

@@ -13,6 +13,9 @@ import type { EngineInterface, Register } from 'claude-code'
 // 5. Rules come live from the OliviaOS skill's MCP (rules_get), falling back
 //    to ~/.oliviaos/RULES.md, and go into every session's system prompt.
 // 6. Status line: "OliviaOS · N logged · N sent · M blocked · night".
+// 8. Infra map first: a prompt about infrastructure gets a reminder to call
+//    infra_get until the map is loaded, and the log says whether it was loaded
+//    before an infra answer or a server action. Reminder only, never blocks.
 // Blocks stay to what the rules need: a read-only look, a safe pattern or
 // Olivia being awake lets the command or question through.
 
@@ -22,6 +25,8 @@ const pending = atom({ plugin: 'oliviaos-guard', key: 'pending' } as const, [] a
 const sent = atom({ plugin: 'oliviaos-guard', key: 'sent' } as const, 0, { shape: 'n-1' })
 const tieredCount = atom({ plugin: 'oliviaos-guard', key: 'tiered' } as const, 0, { shape: 'n-1' })
 const blocked = atom({ plugin: 'oliviaos-guard', key: 'blocked' } as const, 0, { shape: 'n-1' })
+const mapLoaded = atom({ plugin: 'oliviaos-guard', key: 'mapLoaded' } as const, false, { shape: 'b-1' })
+const mapNoted = atom({ plugin: 'oliviaos-guard', key: 'mapNoted' } as const, [] as string[], { shape: 's-1' })
 
 export const CARRY =
   'Follow the OliviaOS Rule in `~/.oliviaos/RULES.md` — decide by reversibility × reach, ' +
@@ -204,12 +209,45 @@ export function turnSummary(nLogged: number, nBlocked: number): string {
   return parts.length ? `— OliviaOS guard: ${parts.join(' · ')} this turn (decisions.md + OliviaOS inbox)` : ''
 }
 
+// ---------- infra map first ----------
+
+export const INFRA_REMINDER =
+  'OliviaOS: this prompt is about infrastructure and the live infra map has not been loaded in this session. ' +
+  'Before answering or acting, call infra_get (and infra_observed for live facts); never answer infra questions ' +
+  'from memory or old notes. If the map and reality disagree, say so and fix the map with infra_upsert.'
+
+// Generic words only: this repository is public. Her other host names are learned from the map itself.
+const INFRA_WORDS =
+  /\b(servers?|vms?|containers?|back-?ups?|domains?|dns|ssh|deploy(?:s|ed|ments?|ing)?|vps|homelab|proxmox|moso-prod|lc-(?:main|db|email)|ax41|os-mcp)\b|palveli[mn]|varmuuskopi|verkkotunnu/i
+
+/** True when the text is about infrastructure: a generic word, or a host name or alias from the map. */
+export function mentionsInfra(text: string, names: string[] = []): boolean {
+  if (INFRA_WORDS.test(text)) return true
+  return names.some(n => new RegExp(`(?<![\\w.-])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'i').test(text))
+}
+
+/** Host-like ids and aliases (with a digit, dot or hyphen) from an infra_get result. */
+export function hostNames(result: string): string[] {
+  try {
+    const nodes: any[] = JSON.parse(result).nodes ?? []
+    const all = nodes
+      .filter(n => !['people', 'saas', 'edge'].includes(n?.kind))
+      .flatMap(n => [n?.id, ...(Array.isArray(n?.aliases) ? n.aliases : [])])
+    return [...new Set(all.filter((s): s is string => typeof s === 'string' && s.length >= 4 && /[0-9.-]/.test(s) && !/[\s@]/.test(s)).map(s => s.toLowerCase()))]
+  } catch {
+    return []
+  }
+}
+
+const INFRA_GET = /^mcp__.+__infra_get$/
+
 // ---------- hooks ----------
 
 let cwd = ''
 let lastPromptAt = 0
 let turnLogged = 0
 let turnBlocked = 0
+let infraTurn = false
 let liveRules = ''
 let rulesFromMcp = false
 let rulesTriedAt = 0
@@ -331,6 +369,14 @@ export const register: Register = on => {
     lastPromptAt = Date.now()
     turnLogged = 0
     turnBlocked = 0
+    // No network here: the names come from the plugin's own store.
+    if (!e.isMeta && !e.command) {
+      const names = ((await $.store.get('infraNames')) as string[] | undefined) ?? []
+      if (mentionsInfra(e.text, names)) {
+        infraTurn = true
+        if (!(await read($, mapLoaded))) return next({ ...e, context: [...(e.context ?? []), INFRA_REMINDER] })
+      }
+    }
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -354,12 +400,14 @@ export const register: Register = on => {
         const what = redact(e.description ? `${e.description}: ${cmd}` : cmd).replace(/\s+/g, ' ').slice(0, 300)
         await update($, logged, n => n + 1)
         turnLogged += 1
+        // A server action says whether the map was loaded first.
+        const map = SSH.test(cmd) ? ` (infra map loaded first: ${(await read($, mapLoaded)) ? 'yes' : 'no'})` : ''
         await record($, {
           title: `[auto] ${what}`,
-          what,
+          what: `${what}${map}`,
           cls: 'auto-logged',
           revert: 'see command; the agent adds a proper entry if this mattered',
-          summary: `oliviaos-guard auto-logged a state-changing command that succeeded (secrets redacted). Also in ~/.oliviaos/decisions.md.\n\n${what}`,
+          summary: `oliviaos-guard auto-logged a state-changing command that succeeded (secrets redacted). Also in ~/.oliviaos/decisions.md.\n\n${what}${map}`,
         })
         await refresh($)
       } catch {
@@ -371,6 +419,22 @@ export const register: Register = on => {
 
   // 3: carry the rule into subagent and session briefs.
   on('tool.call', async ($, e: any, next) => {
+    if (typeof e.tool === 'string' && INFRA_GET.test(e.tool)) {
+      const ran: any = await next(e)
+      if (ran.deny === undefined && ran.isError !== true) {
+        try {
+          await update($, mapLoaded, () => true)
+          const found = hostNames(ran.text ?? '')
+          if (found.length) {
+            const known = ((await $.store.get('infraNames')) as string[] | undefined) ?? []
+            await $.store.set('infraNames', [...new Set([...known, ...found])].slice(-300))
+          }
+        } catch {
+          // Never break a tool call over the reminder.
+        }
+      }
+      return ran
+    }
     const isBrief = e.tool === 'Agent' || e.tool === 'mcp__ccd_session__start_session'
     if (typeof e.tool === 'string' && /oliviaos.*__ask_olivia$/.test(e.tool) && e.blocking === true) {
       const why = questionVerdict([String(e.question ?? '')], isNight(helsinkiHour()))
@@ -427,6 +491,21 @@ export const register: Register = on => {
     const line = turnSummary(turnLogged, turnBlocked)
     turnLogged = 0
     turnBlocked = 0
+    // Once per session and outcome: was the map loaded before an infra answer? The prompt itself is never recorded.
+    if (infraTurn) {
+      infraTurn = false
+      try {
+        const loaded = await read($, mapLoaded)
+        const key = loaded ? 'loaded' : 'missing'
+        if (!(await read($, mapNoted)).includes(key)) {
+          await update($, mapNoted, a => [...a, key])
+          const title = loaded
+            ? '[infra-check] infra map was loaded before an infra answer'
+            : '[infra-check] infra answer without loading the infra map'
+          await record($, { title, what: title, cls: 'infra-check', revert: 'nothing to revert', summary: `${title}. Recorded once per session; the prompt is not included.` })
+        }
+      } catch {}
+    }
     return line && typeof r.text === 'string' ? { ...r, text: `${r.text}\n\n${line}` } : r
   }).catch(($, e, next) => next(e))
 }

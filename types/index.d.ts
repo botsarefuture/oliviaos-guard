@@ -5,6 +5,8 @@ declare module 'claude-code' {
       blocked: Shaped<number>
       tiered: Shaped<number>
       sent: Shaped<number>
+      mapLoaded: Shaped<boolean>
+      mapNoted: Shaped<string[]>
       pending: Shaped<{ title: string; summary: string; what: string; project: string }[]>
     }
   }

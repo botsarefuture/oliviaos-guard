@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
+import { mentionsInfra, hostNames, INFRA_REMINDER, turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
 
 const DAY = 14
 const NIGHT = 2
@@ -173,4 +173,55 @@ test('the reply gets the guard line after a block', async ($, on) => {
   await $.tool.call({ tool: 'Bash', command: "ss" + "h h 'pk" + "ill -f sshd'" } as any)
   const r: any = await $.turn.complete({ reason: 'answer', answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't1' } as any)
   expect(r.text).toMatch(/Done\.\n\n— OliviaOS guard: 1 blocked/)
+})
+
+
+test('infra words and map names are noticed, other prompts are not', async () => {
+  for (const p of ['how is the server doing', 'check DNS for that domain', 'did the backup run?', 'deploy it', 'ssh to moso-prod', 'Missä palvelimessa se on?', 'onko varmuuskopio tehty'])
+    expect(mentionsInfra(p)).toBe(true)
+  for (const p of ['fix the button colour', 'summarize this essay', 'write a cover letter', 'the observer pattern'])
+    expect(mentionsInfra(p)).toBe(false)
+  expect(mentionsInfra('what runs on box-7.example?', ['box-7.example'])).toBe(true)
+  expect(mentionsInfra('mybox-7.examples', ['box-7.example'])).toBe(false)
+})
+
+test('only host-like names are learned from the map', async () => {
+  const map = JSON.stringify({ nodes: [
+    { id: 'web-01', kind: 'vm', aliases: ['web.example', 'email'] },
+    { id: 'some-saas', kind: 'saas' },
+    { id: 'olive', kind: 'people', aliases: ['olive-mac'] },
+  ] })
+  expect(hostNames(map)).toEqual(['web-01', 'web.example'])
+  expect(hostNames('not json')).toEqual([])
+})
+
+test('an infra prompt gets the reminder until the map is loaded', async ($, on) => {
+  const seen: any[] = []
+  on('prompt.submit', (_, e: any) => { seen.push(e.context ?? []); return { text: e.text } })
+  on('store.get', () => ({ value: undefined }))
+  on('store.set', () => ({ value: undefined }))
+  on('tool.call', () => ({ result: {} }))
+  await $.prompt.submit({ text: 'is the server up?' } as any)
+  await $.prompt.submit({ text: 'rename this variable' } as any)
+  await $.tool.call({ tool: 'mcp__claude_ai_oliviaos__infra_get' } as any)
+  await $.prompt.submit({ text: 'is the server up?' } as any)
+  expect(seen[0]).toEqual([INFRA_REMINDER])
+  expect(seen[1]).toEqual([])
+  expect(seen[2]).toEqual([])
+})
+
+test('an infra answer without the map is recorded once, without the prompt', async ($, on) => {
+  const calls: any[] = []
+  on('prompt.submit', (_, e: any) => ({ text: e.text }))
+  on('store.get', () => ({ value: undefined }))
+  on('turn.complete', () => ({ text: 'Done.' }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('env.get', () => ({ value: '/Users/x' }))
+  on('mcp.call', (_, e: any) => { calls.push(e); return { value: { content: [], isError: false } } })
+  const done = () => $.turn.complete({ reason: 'answer', answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't' } as any)
+  for (let i = 0; i < 2; i++) { await $.prompt.submit({ text: 'which server holds the secretword?' } as any); await done() }
+  const sent = JSON.stringify(calls.filter(c => JSON.stringify(c).includes('infra-check')))
+  expect(calls.filter(c => JSON.stringify(c).includes('infra-check')).length).toBe(1)
+  expect(sent).toContain('without loading')
+  expect(sent).not.toContain('secretword')
 })
