@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { mentionsInfra, hostNames, INFRA_REMINDER, turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
+import { isPermissionAsk, boxVerdict, mentionsInfra, hostNames, INFRA_REMINDER, turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
 
 const DAY = 14
 const NIGHT = 2
@@ -224,4 +224,35 @@ test('an infra answer without the map is recorded once, without the prompt', asy
   expect(calls.filter(c => JSON.stringify(c).includes('infra-check')).length).toBe(1)
   expect(sent).toContain('without loading')
   expect(sent).not.toContain('secretword')
+})
+
+
+test('yes / no questions are permission requests, real choices are not', async () => {
+  const yn = [{ label: 'Yes, rewrite it' }, { label: 'Leave it' }]
+  expect(boxVerdict('Rewrite the repo history to remove the email?', yn)).toMatch(/AUTONOMY/)
+  expect(boxVerdict('Turn on auto-update?', [{ label: 'Yes, turn on' }, { label: 'Not now' }])).toMatch(/AUTONOMY/)
+  expect(boxVerdict('Remove the old plugin?', [{ label: 'Yes, remove it' }, { label: 'Keep it' }])).toMatch(/AUTONOMY/)
+  expect(boxVerdict('Which database is the source of truth?', [{ label: 'Mongo' }, { label: 'Postgres' }])).toBe(undefined)
+  expect(boxVerdict('IRREVERSIBLE+LIVE: drop the only copy? No export exists.', yn)).toBe(undefined)
+  expect(boxVerdict('Send the email to the landlord?', yn)).toBe(undefined)
+  expect(boxVerdict(undefined, undefined)).toBe(undefined)
+  expect(isPermissionAsk('Which language?', ['Go', 'Rust'])).toBe(false)
+  expect(isPermissionAsk('Which CSS setup?', ['Tailwind', 'No framework'])).toBe(false)
+  expect(isPermissionAsk('Ajetaanko?', ['Kyllä', 'Ei'])).toBe(true)
+  expect(boxVerdict('Commit this?', [{ action: 'commit' }])).toBe(undefined)
+  expect(isPermissionAsk('Should I restart nginx?')).toBe(true)
+  expect(isPermissionAsk('Which approach?', ['Nothing else', 'Normal mode'])).toBe(false)
+})
+
+test('the next-step box refuses a permission question and passes a plain recap', async ($, on) => {
+  let ran = 0
+  on('tool.call', () => { ran++; return { result: {} } })
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('env.get', () => ({ value: '/Users/x' }))
+  on('mcp.call', () => ({ value: { content: [], isError: false } }))
+  const r: any = await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: 'x', ask: 'Rewrite history?', actions: [{ label: 'Yes' }, { label: 'No' }] } as any)
+  expect(JSON.stringify(r)).toMatch(/AUTONOMY/)
+  expect(ran).toBe(0)
+  await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', recap: 'done' } as any)
+  expect(ran).toBe(1)
 })

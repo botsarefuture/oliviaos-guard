@@ -145,6 +145,27 @@ export const NIGHT =
 const ASKS_PERMISSION =
   /\b(should i|shall i|want me to|ok to|okay to|can i go ahead|go ahead and|ok if i|is it ok|mind if i|would you like me to|do you want me to|shall we|should we)\b/i
 const LABEL = /IRREVERSIBLE\+LIVE/
+// "Rewrite the history?" asks permission without any of the phrases above; yes / no answers give it away.
+// Short words must be the whole answer ("No framework" and the language "Go" are real choices).
+const YES = /^\s*(yes\b|(ok|okay|sure|do it|go ahead|approve|confirm|kyllä|joo)(\s*$|[,.!]))/i
+const NO = /^\s*((no|nope|ei|skip|later|cancel)(\s*$|[,.!])|(not now|not yet|keep (it|them|both)|leave (it|them))\b)/i
+// Acts that need her own yes whatever the rules say: leave those questions alone.
+const NEEDS_HER = /\b(send|pay|buy|purchase|sign up|accept (the )?terms|permanently delete)\b/i
+
+/** True when a question with these answer buttons is a request for permission. */
+export function isPermissionAsk(question: string, answers: string[] = []): boolean {
+  if (LABEL.test(question) || NEEDS_HER.test(question)) return false
+  return ASKS_PERMISSION.test(question) || answers.some(a => YES.test(a) || NO.test(a))
+}
+
+/** Deny reason for the app's next-step box (wrap_up ask), or undefined. */
+export function boxVerdict(ask: unknown, actions: unknown): string | undefined {
+  if (typeof ask !== 'string' || !ask) return undefined
+  // App actions (commit, create_pr, ...) are the app's own buttons, not a question's answers.
+  const answers = (Array.isArray(actions) ? actions : []).filter((a: any) => !a?.action).map((a: any) => String(a?.label ?? ''))
+  if (!isPermissionAsk(ask, answers)) return undefined
+  return 'AUTONOMY: this next-step box asks Olivia for permission. Under the OliviaOS Rule reversible work is not a question: back up, do it now, then call wrap_up with only a recap. If it is irreversible + Live with no backup or fallback possible, start the ask with "IRREVERSIBLE+LIVE:" and say why. Do not move the question into your closing text instead.'
+}
 
 /** Deny reason for a question to Olivia, or undefined to let it through. */
 export function questionVerdict(texts: string[], night: boolean, awake = false): string | undefined {
@@ -435,6 +456,10 @@ export const register: Register = on => {
       }
       return ran
     }
+    if (e.tool === 'mcp__ccd_turn__wrap_up') {
+      const why = boxVerdict(e.ask, e.actions)
+      return why ? refuse($, why, `wrap_up ask: ${e.ask}`) : next(e)
+    }
     const isBrief = e.tool === 'Agent' || e.tool === 'mcp__ccd_session__start_session'
     if (typeof e.tool === 'string' && /oliviaos.*__ask_olivia$/.test(e.tool) && e.blocking === true) {
       const why = questionVerdict([String(e.question ?? '')], isNight(helsinkiHour()))
@@ -469,7 +494,10 @@ export const register: Register = on => {
   // 6: questions, pings and wake-ups.
   on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
     const texts = (e.questions ?? []).map(q => q.question ?? '')
-    const why = questionVerdict(texts, isNight(helsinkiHour()), awakeNow())
+    const night = isNight(helsinkiHour())
+    const yesNo = (e.questions ?? []).some(q => isPermissionAsk(q.question ?? '', (q.options ?? []).map(o => o.label ?? '')))
+    const why = questionVerdict(texts, night, awakeNow()) ??
+      (!night && yesNo && !texts.some(t => LABEL.test(t)) ? 'AUTONOMY: a yes / no question about reversible work is a permission request. Back up, do it, and report after. If irreversible + Live with no backup possible, start the question with "IRREVERSIBLE+LIVE:".' : undefined)
     return why ? refuse($, why, `AskUserQuestion: ${texts.join(' | ')}`) : next(e)
   }).catch(($, e, next) => next(e))
 

@@ -9,6 +9,7 @@ Turns the OliviaOS Rule (`~/.oliviaos/RULES.md`) from text into hooks, so no ses
 - **Infra map first**: a prompt about infrastructure (generic words, or host names learned from earlier `infra_get` results, stored only on your machine) gets a short reminder to call `infra_get` until the map is loaded. Server actions are logged with `infra map loaded first: yes/no`, and once per session an `infra-check` entry says whether the map was loaded before an infra answer. Reminder only, never blocks; the prompt text is not recorded.
 - **Status line**: `OliviaOS · N logged · N sent · M blocked · night`.
 - **Autonomy, always**: a system-prompt section tells every session to decide reversible work itself. A question to Olivia (AskUserQuestion, blocking `ask_olivia`) that asks permission is refused unless it starts with `IRREVERSIBLE+LIVE:` and says why no backup is possible. Blocking `ask_olivia` with a `default_action` is turned non-blocking.
+- **Next-step box and yes/no questions**: a `wrap_up` question or `AskUserQuestion` whose answers are yes / no (or that asks permission in words) is refused unless it starts with `IRREVERSIBLE+LIVE:`. Questions about sending, paying or permanent deletion pass. Plain closing text cannot be blocked.
 - **Night guard, 23:00–08:00 Helsinki**: AskUserQuestion, PushNotification and blocking `ask_olivia` are refused. Proactive file sends go quietly. A night section in the system prompt says: decide yourself, contain only (stop, pause, roll back), hold real decisions for the ~10:00 report.
 
 ## Install
