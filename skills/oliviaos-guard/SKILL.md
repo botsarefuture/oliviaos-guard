@@ -22,6 +22,7 @@ the OliviaOS connector's `rules_get` and are in your system prompt.
   to…") is refused unless it starts with `IRREVERSIBLE+LIVE:`.
 - **Night guard, 23:00–08:00 Helsinki:** no questions, no phone notifications, no
   blocking `ask_olivia`. A factual question is allowed while Olivia is chatting.
+- **Model tiering:** an `Agent` or `start_session` call with no model gets the cheapest that fits: Haiku for read-only work (search, read, status, summaries, Explore), Sonnet by default, and no change (inherits) for architecture, security/auth, planning or hard debugging. A model you set is never changed; forks are left alone.
 - **Briefs:** adds the OliviaOS carry-forward line to every subagent and session
   brief that lacks it.
 

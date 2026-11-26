@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
+import { pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
 
 const DAY = 14
 const NIGHT = 2
@@ -140,4 +140,24 @@ test('writing about a hard stop is not a hard stop', async () => {
   expect(hardStop(heredoc, 14)).toBe(undefined)
   // the real thing is still blocked
   expect(hardStop(`git commit -m "x" && ss` + `h h 'pki` + `ll -f node'`, 14)).toMatch(/HARD STOP/)
+})
+
+test('model tiering picks the cheapest model that fits', async () => {
+  expect(pickTier('Search the repo for where tokens are hashed and report file:line')).toBe('haiku')
+  expect(pickTier('anything', 'Explore')).toBe('haiku')
+  expect(pickTier('Fix the failing pagination test and push')).toBe('sonnet')
+  expect(pickTier('Design the auth architecture for the new API')).toBe('opus')
+  expect(withTier({ tool: 'Agent', prompt: 'Read the logs and summarize errors' }).model).toBe('haiku')
+  expect(withTier({ tool: 'Agent', prompt: 'Read the logs', model: 'opus' }).model).toBe('opus')
+  expect(withTier({ tool: 'Agent', prompt: 'x', subagent_type: 'fork' }).model).toBe(undefined)
+  expect(withTier({ tool: 'Agent', prompt: 'Plan the security review of auth' }).model).toBe(undefined)
+  expect(withTier({ tool: 'mcp__ccd_session__start_session', title: 'Fix CI', prompt: 'Fix the lint errors' }).model).toBe('claude-sonnet-5-5')
+  expect(withTier({ tool: 'mcp__ccd_session__start_session', prompt: 'x', context: 'fork' }).model).toBe(undefined)
+})
+
+test('an Agent call without a model gets one', async ($, on) => {
+  let seen: any
+  on('tool.call', (_, e: any) => { seen = e; return { result: {} } })
+  await $.tool.call({ tool: 'Agent', description: 'find files', prompt: 'Find every file that reads TOKEN and list them' } as any)
+  expect(seen.model).toBe('haiku')
 })

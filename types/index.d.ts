@@ -3,6 +3,7 @@ declare module 'claude-code' {
     'oliviaos-guard': {
       logged: Shaped<number>
       blocked: Shaped<number>
+      tiered: Shaped<number>
       sent: Shaped<number>
       pending: Shaped<{ title: string; summary: string; what: string; project: string }[]>
     }

@@ -20,6 +20,7 @@ const logged = atom({ plugin: 'oliviaos-guard', key: 'logged' } as const, 0, { s
 type Report = { title: string; summary: string; what: string; project: string; cls?: string; revert?: string }
 const pending = atom({ plugin: 'oliviaos-guard', key: 'pending' } as const, [] as Report[], { shape: 'reports-1' })
 const sent = atom({ plugin: 'oliviaos-guard', key: 'sent' } as const, 0, { shape: 'n-1' })
+const tieredCount = atom({ plugin: 'oliviaos-guard', key: 'tiered' } as const, 0, { shape: 'n-1' })
 const blocked = atom({ plugin: 'oliviaos-guard', key: 'blocked' } as const, 0, { shape: 'n-1' })
 
 export const CARRY =
@@ -150,6 +151,49 @@ export function questionVerdict(texts: string[], night: boolean, awake = false):
   if (!night && ASKS_PERMISSION.test(all) && !LABEL.test(all))
     return 'AUTONOMY: this asks Olivia for permission. Under the OliviaOS Rule you decide reversible work yourself: do it and report after. If it truly is irreversible + Live with no backup or fallback possible, ask again with the question starting "IRREVERSIBLE+LIVE:" and why no backup is possible. Otherwise use ask_olivia with a default_action and carry on.'
   return undefined
+}
+
+
+// ---------- model tiering ----------
+
+export type Tier = 'haiku' | 'sonnet' | 'opus'
+
+const READ_ONLY_AGENTS = /^(Explore|web-fetch|claude-code-guide|statusline-setup)$/
+const READ_ONLY =
+  /\b(search|find|look up|lookup|locate|grep|read|list|summari[sz]e|summary|status|check (if|whether|the)|watch|monitor|fetch|scan|inspect|count|what (is|are)|where (is|are)|which)\b/i
+const WRITES =
+  /\b(fix|implement|build|write|edit|change|update|add|create|refactor|migrate|deploy|install|delete|remove|rename|merge|rebase|commit|push|test|debug)\b/i
+const OPUS_WORK =
+  /\b(architect|architecture|design (the|a|an)|plan(ning)? (the|a|an)|security|auth(entication|orization)?|permissions?|privilege|threat model|hard (bug|debug)|root cause|final (call|judg(e)?ment|review))\b/i
+
+/** The cheapest model that fits the brief (OliviaOS model tiering). */
+export function pickTier(prompt: string, agentType = ''): Tier {
+  if (READ_ONLY_AGENTS.test(agentType)) return 'haiku'
+  if (OPUS_WORK.test(prompt)) return 'opus'
+  if (READ_ONLY.test(prompt) && !WRITES.test(prompt)) return 'haiku'
+  return 'sonnet'
+}
+
+const SESSION_MODEL: Record<Tier, string> = {
+  haiku: 'claude-haiku-5-5',
+  sonnet: 'claude-sonnet-5-5',
+  opus: 'claude-opus-5-5',
+}
+
+/** Adds a model to an Agent or start_session call that has none; never overrides one that is set. */
+export function withTier(e: any): any {
+  if (typeof e.prompt !== 'string' || e.prompt.length === 0) return e
+  if (e.tool === 'Agent') {
+    if (e.model || e.subagent_type === 'fork') return e
+    const t = pickTier(`${e.description ?? ''} ${e.prompt}`, e.subagent_type ?? '')
+    return t === 'opus' ? e : { ...e, model: t }
+  }
+  if (e.tool === 'mcp__ccd_session__start_session') {
+    if (e.model || e.context === 'fork' || e.target === 'cloud' || e.proposal_id) return e
+    const t = pickTier(`${e.title ?? ''} ${e.prompt}`)
+    return t === 'opus' ? e : { ...e, model: SESSION_MODEL[t] }
+  }
+  return e
 }
 
 // ---------- hooks ----------
@@ -320,7 +364,9 @@ export const register: Register = on => {
       }
     }
     if (isBrief && typeof e.prompt === 'string' && e.prompt.length > 0) {
-      return next({ ...e, prompt: withCarry(e.prompt) })
+      const tiered = withTier(e)
+      if (tiered.model !== e.model) await update($, tieredCount, n => n + 1)
+      return next({ ...tiered, prompt: withCarry(e.prompt) })
     }
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -365,11 +411,12 @@ export const register: Register = on => {
     const b = await read($, blocked)
     const s = await read($, sent)
     const q = (await read($, pending)).length
+    const t = await read($, tieredCount)
     const night = isNight(helsinkiHour())
     return (
       <Box>
         <Text dimColor>
-          OliviaOS guard on · {n} logged · {s} sent{q > 0 ? ` (${q} queued)` : ''} · {b} blocked{night ? ' · night' : ''}
+          OliviaOS guard on · {n} logged · {s} sent{q > 0 ? ` (${q} queued)` : ''} · {b} blocked{t > 0 ? ` · ${t} on cheaper model` : ''}{night ? ' · night' : ''}
         </Text>
       </Box>
     )
