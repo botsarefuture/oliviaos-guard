@@ -177,7 +177,7 @@ test('the reply gets the guard line after a block', async ($, on) => {
 
 
 test('infra words and map names are noticed, other prompts are not', async () => {
-  for (const p of ['how is the server doing', 'check DNS for that domain', 'did the backup run?', 'deploy it', 'ssh to moso-prod', 'Missä palvelimessa se on?', 'onko varmuuskopio tehty'])
+  for (const p of ['how is the server doing', 'check DNS for that domain', 'did the backup run?', 'deploy it', 'ssh to moso-prod', 'Missä palvelimessa se on?', 'onko varmuuskopio tehty', 'which node in the infra map runs it?'])
     expect(mentionsInfra(p)).toBe(true)
   for (const p of ['fix the button colour', 'summarize this essay', 'write a cover letter', 'the observer pattern'])
     expect(mentionsInfra(p)).toBe(false)

@@ -218,7 +218,7 @@ export const INFRA_REMINDER =
 
 // Generic words only: this repository is public. Her other host names are learned from the map itself.
 const INFRA_WORDS =
-  /\b(servers?|vms?|containers?|back-?ups?|domains?|dns|ssh|deploy(?:s|ed|ments?|ing)?|vps|homelab|proxmox|moso-prod|lc-(?:main|db|email)|ax41|os-mcp)\b|palveli[mn]|varmuuskopi|verkkotunnu/i
+  /\b(servers?|vms?|containers?|back-?ups?|domains?|dns|ssh|deploy(?:s|ed|ments?|ing)?|vps|homelab|proxmox|moso-prod|lc-(?:main|db|email)|ax41|os-mcp|infra(?:structure)?)\b|palveli[mn]|varmuuskopi|verkkotunnu/i
 
 /** True when the text is about infrastructure: a generic word, or a host name or alias from the map. */
 export function mentionsInfra(text: string, names: string[] = []): boolean {
