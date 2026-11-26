@@ -1,0 +1,13 @@
+{
+  "name": "oliviaos-guard",
+  "owner": {
+    "name": "Olivia"
+  },
+  "plugins": [
+    {
+      "name": "oliviaos-guard",
+      "source": "./",
+      "description": "Enforces the OliviaOS Rule: blocks HARD STOPS, auto-logs state changes to decisions.md, carries the rule into every subagent and session brief."
+    }
+  ]
+}
