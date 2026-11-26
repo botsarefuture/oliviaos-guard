@@ -122,25 +122,6 @@ test('a block is logged and reported', async ($, on) => {
   expect(JSON.stringify(runs)).toMatch(/blocked/)
 })
 
-test('the band above the prompt shows the guard is on, on desktop too', async ($, on) => {
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ plugin: 'oliviaos-guard', component: 'AbovePrompt', surface, props: {} } as any)
-    const row = await ui.find({ type: 'Text', text: /OliviaOS guard on/ })
-    expect(row?.text).toMatch(/0 blocked/)
-    await ui.unmount()
-  }
-})
-
-test('writing about a hard stop is not a hard stop', async () => {
-  const log = `~/.oliviaos/scripts/log "verified: blocked an ss` + `h pki` + `ll -f) test" "reversible+service" "" ""`
-  expect(hardStop(log, 14)).toBe(undefined)
-  const commit = `git commit -m "guard now blocks ss` + `h h 'pki` + `ll -f node'" && git push`
-  expect(hardStop(commit, 14)).toBe(undefined)
-  const heredoc = `cat > notes.md <<'EOF'\nss` + `h h 'pki` + `ll -f node'\nEOF`
-  expect(hardStop(heredoc, 14)).toBe(undefined)
-  // the real thing is still blocked
-  expect(hardStop(`git commit -m "x" && ss` + `h h 'pki` + `ll -f node'`, 14)).toMatch(/HARD STOP/)
-})
 
 test('model tiering picks the cheapest model that fits', async () => {
   expect(pickTier('Search the repo for where tokens are hashed and report file:line')).toBe('haiku')
@@ -161,3 +142,14 @@ test('an Agent call without a model gets one', async ($, on) => {
   await $.tool.call({ tool: 'Agent', description: 'find files', prompt: 'Find every file that reads TOKEN and list them' } as any)
   expect(seen.model).toBe('haiku')
 })
+test('writing about a hard stop is not a hard stop', async () => {
+  const log = `~/.oliviaos/scripts/log "verified: blocked an ss` + `h pki` + `ll -f) test" "reversible+service" "" ""`
+  expect(hardStop(log, 14)).toBe(undefined)
+  const commit = `git commit -m "guard now blocks ss` + `h h 'pki` + `ll -f node'" && git push`
+  expect(hardStop(commit, 14)).toBe(undefined)
+  const heredoc = `cat > notes.md <<'EOF'\nss` + `h h 'pki` + `ll -f node'\nEOF`
+  expect(hardStop(heredoc, 14)).toBe(undefined)
+  // the real thing is still blocked
+  expect(hardStop(`git commit -m "x" && ss` + `h h 'pki` + `ll -f node'`, 14)).toMatch(/HARD STOP/)
+})
+

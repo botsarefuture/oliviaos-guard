@@ -263,7 +263,9 @@ async function refresh($: EngineInterface) {
   const q = (await read($, pending)).length
   const night = isNight(helsinkiHour()) ? ' · night' : ''
   const queued = q > 0 ? ` (${q} queued)` : ''
-  $.ui.status(`OliviaOS · ${n} logged · ${s} sent${queued} · ${b} blocked${night}`)
+  const t = await read($, tieredCount)
+  const cheap = t > 0 ? ` · ${t} on cheaper model` : ''
+  $.ui.status(`OliviaOS guard · ${n} logged · ${s} sent${queued} · ${b} blocked${cheap}${night}`)
 }
 
 export function reportArgs(r: Report) {
@@ -403,22 +405,4 @@ export const register: Register = on => {
     isNight(helsinkiHour()) && !awakeNow() && e.status === 'proactive' ? next({ ...e, status: 'normal' }) : next(e),
   ).catch(($, e, next) => next(e))
 
-  // 7: a row above the prompt, since the desktop app draws no status line.
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
-    const { Box, Text } = $.ui.resolve(e)
-    const n = await read($, logged)
-    const b = await read($, blocked)
-    const s = await read($, sent)
-    const q = (await read($, pending)).length
-    const t = await read($, tieredCount)
-    const night = isNight(helsinkiHour())
-    return (
-      <Box>
-        <Text dimColor>
-          OliviaOS guard on · {n} logged · {s} sent{q > 0 ? ` (${q} queued)` : ''} · {b} blocked{t > 0 ? ` · ${t} on cheaper model` : ''}{night ? ' · night' : ''}
-        </Text>
-      </Box>
-    )
-  }).catch(($, e, next) => next(e))
 }
