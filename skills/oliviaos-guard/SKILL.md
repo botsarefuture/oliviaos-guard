@@ -27,6 +27,13 @@ the OliviaOS connector's `rules_get` and are in your system prompt.
 - **Caveman voice:** talk caveman everywhere (chat, recaps, reports, briefs). Full sentences for warnings, irreversible steps, questions, and anything saved or sent to others. Off only on the user's `stop caveman` / `normal mode`.
 - **Decisions and preferences:** consult a stronger model before decisions that matter (`advisor`, else an Agent with `model: "opus"`); a brief that asks for a consult (brainstorm, best way, trade-offs, second opinion) gets Opus. `~/.oliviaos/preferences.md` is in the system prompt: act on it and say so. A correction from Olivia gets a reminder to record it there (or in project memory). Nudges only, never blocks.
 - **Model tiering:** an `Agent` or `start_session` call with no model gets the cheapest that fits: Haiku for read-only work (search, read, status, summaries, Explore), Sonnet by default, and no change (inherits) for architecture, security/auth, planning or hard debugging. A model you set is never changed; forks are left alone.
+- **Permission prompts to OliviaOS (0.11.0):** every Claude Code permission prompt is also sent to
+  Olivia's OliviaOS inbox as a notice (`ask_olivia`, session `oliviaos-guard`; at night only a report).
+  Observe only: the guard never answers a prompt, and an answer in OliviaOS does not approve it.
+- **Classifier blocks recorded (0.11.0):** each auto-mode permission denial is logged (class
+  `classifier-block`) to `decisions.md` and OliviaOS, so reversible ones can move into
+  `autoMode.allow` (Olivia runs `~/.oliviaos/scripts/tidy-settings`-style scripts; agents never edit
+  their own permission settings).
 - **Briefs:** adds the OliviaOS carry-forward line to every subagent and session
   brief that lacks it.
 
@@ -53,4 +60,4 @@ to slip past the check.
 
 - Status line: `OliviaOS · N logged · N sent (N queued) · M blocked · night`.
 - Every entry: `~/.oliviaos/decisions.md` and the OliviaOS inbox.
-- Source: `guard/` in https://github.com/botsarefuture/oliviaos-skill.
+- Source: https://github.com/botsarefuture/oliviaos-guard (listed in the oliviaos-skill marketplace).
