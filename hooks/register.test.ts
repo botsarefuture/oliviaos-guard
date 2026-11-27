@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { caveSwitch, CAVEMAN_REMINDER, isPermissionAsk, boxVerdict, mentionsInfra, hostNames, INFRA_REMINDER, turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight } from './register'
+import { caveSwitch, CAVEMAN_REMINDER, isPermissionAsk, boxVerdict, mentionsInfra, hostNames, INFRA_REMINDER, turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight, isConsult, looksLikeFeedback, prefsSection, PREFS_REMINDER, AUTONOMY } from './register'
 
 const DAY = 14
 const NIGHT = 2
@@ -276,4 +276,43 @@ test('her stop turns the reminder off, another session cannot', async ($, on) =>
   expect(seen[1]).toEqual([CAVEMAN_REMINDER])
   expect(seen[3]).toEqual([])
   expect(seen[4]).toEqual([CAVEMAN_REMINDER])
+})
+
+
+test('a decision consult gets Opus explicitly, other tiering unchanged', async () => {
+  expect(isConsult('Brainstorm the best way to store preferences')).toBe(true)
+  expect(isConsult('Fix the lint errors')).toBe(false)
+  expect(pickTier('Which approach is better: a file or a table? Give the trade-offs')).toBe('opus')
+  expect(withTier({ tool: 'Agent', prompt: 'Which approach is better: a file or a table? Give the trade-offs' }).model).toBe('opus')
+  expect(withTier({ tool: 'Agent', prompt: 'Brainstorm options', model: 'sonnet' }).model).toBe('sonnet')
+  expect(withTier({ tool: 'Agent', prompt: 'Find the best way in', subagent_type: 'Explore' }).model).toBe('haiku')
+  expect(withTier({ tool: 'mcp__ccd_session__start_session', prompt: 'Second opinion on the data model' }).model).toBe('claude-opus-5-5')
+  expect(withTier({ tool: 'Agent', prompt: 'Read the logs and summarize errors' }).model).toBe('haiku')
+})
+
+test('rules text carries brainstorm and preferences', async () => {
+  expect(CARRY).toMatch(/stronger model/)
+  expect(CARRY).toMatch(/preferences\.md/)
+  expect(AUTONOMY).toMatch(/advisor tool/)
+  expect(AUTONOMY).toMatch(/my_answers/)
+})
+
+test('her corrections get the preference reminder, plain prompts do not', async ($, on) => {
+  for (const p of ["No, don't use tabs", 'Älä tee noin', 'I prefer one PR per repo', 'from now on put tests first']) expect(looksLikeFeedback(p)).toBe(true)
+  for (const p of ['Fix the failing test', 'What runs on the homelab?', 'Notice the bug']) expect(looksLikeFeedback(p)).toBe(false)
+  const seen: any[] = []
+  on('prompt.submit', (_, e: any) => { seen.push(e.context ?? []); return { text: e.text } })
+  on('store.get', () => ({ value: undefined }))
+  await $.prompt.submit({ text: "No, don't do it that way" } as any)
+  await $.prompt.submit({ text: "No, don't do it that way", origin: { kind: 'peer' } } as any)
+  expect(seen[0]).toContain(PREFS_REMINDER)
+  expect(seen[1]).not.toContain(PREFS_REMINDER)
+})
+
+test('preferences section is capped and empty for a missing file', async () => {
+  expect(prefsSection('')).toBe('')
+  expect(prefsSection('- a')).toMatch(/my_answers/)
+  const big = prefsSection('x'.repeat(10000))
+  expect(big.length < 4600).toBe(true)
+  expect(big).toMatch(/full file/)
 })

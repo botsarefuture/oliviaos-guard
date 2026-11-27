@@ -13,6 +13,10 @@ import type { EngineInterface, Register } from 'claude-code'
 // 5. Rules come live from the OliviaOS skill's MCP (rules_get), falling back
 //    to ~/.oliviaos/RULES.md, and go into every session's system prompt.
 // 6. Status line: "OliviaOS · N logged · N sent · M blocked · night".
+// 9. Decisions and preferences: briefs for a decision consult get Opus, the
+//    system prompt says to consult a stronger model on decisions that matter,
+//    ~/.oliviaos/preferences.md goes into every session's system prompt, and a
+//    correction from Olivia gets a reminder to record it. Nudges only.
 // 8. Infra map first: a prompt about infrastructure gets a reminder to call
 //    infra_get until the map is loaded, and the log says whether it was loaded
 //    before an infra answer or a server action. Reminder only, never blocks.
@@ -32,7 +36,9 @@ const mapNoted = atom({ plugin: 'oliviaos-guard', key: 'mapNoted' } as const, []
 export const CARRY =
   'Follow the OliviaOS Rule in `~/.oliviaos/RULES.md` — decide by reversibility × reach, ' +
   'make irreversible things reversible then do them, ask only for irreversible+Live. ' +
-  'Log state changes via `~/.oliviaos/scripts/log`. Use caveman voice. Follow model tiering.'
+  'Log state changes via `~/.oliviaos/scripts/log`. Use caveman voice. Follow model tiering. ' +
+  'Consult a stronger model (advisor / Opus subagent) before decisions that matter. ' +
+  'Read `~/.oliviaos/preferences.md` and act on it; her explicit answers win.'
 
 const PROD = /\b(moso-prod|lc-main|lc-db|lc-email|ax41|xeon|prod)\b/i
 const SSH = /\bssh\b/
@@ -133,7 +139,14 @@ export const AUTONOMY =
   'production data, auth) with no possible backup is a question for Olivia. "It is risky" is not a reason to ask. ' +
   'Never end with "want me to…?" / "should I…?" for reversible work: just do it. A pending question never idles you: ' +
   'use ask_olivia with a default_action and carry on. To ask anyway, start the question with "IRREVERSIBLE+LIVE:" ' +
-  'and say why no backup or fallback is possible.'
+  'and say why no backup or fallback is possible. ' +
+  'When a decision matters (real alternatives, a wrong pick is costly or hard to undo: architecture, data model, auth, ' +
+  'an irreversible step, changing her plan), consult a stronger model first: the advisor tool if present, else an ' +
+  'Agent with model "opus" and a short brief (decision, options, constraints). Not for trivial choices. Then decide ' +
+  'yourself. When Olivia corrects you, rejects something or approves something non-obvious, record it as a preference ' +
+  '(what · why · how to apply) in ~/.oliviaos/preferences.md (general) or project memory (project-specific). When a ' +
+  'known preference covers a choice, act on it and say so ("doing X, you\'ve preferred X before"); do not ask. Her ' +
+  'explicit answers (my_answers) and current instructions always win over a prediction.'
 
 export const NIGHT =
   'It is night in Helsinki (23:00–08:00). Olivia is asleep and must not be woken or asked for approval ' +
@@ -193,10 +206,17 @@ const WRITES =
 const OPUS_WORK =
   /\b(architect|architecture|design (the|a|an)|plan(ning)? (the|a|an)|security|auth(entication|orization)?|permissions?|privilege|threat model|hard (bug|debug)|root cause|final (call|judg(e)?ment|review))\b/i
 
+// A decision consult: the brief asks a stronger model to help choose. It gets Opus explicitly, not the session's model.
+const CONSULT =
+  /\b(brainstorm|advise|advice|best way|which approach|trade-?offs?|decide between|pros and cons|second opinion|recommend(ation)?)\b/i
+
+/** True when the brief asks for a decision consult (OliviaOS: brainstorm with a stronger model). */
+export const isConsult = (prompt: string) => CONSULT.test(prompt)
+
 /** The cheapest model that fits the brief (OliviaOS model tiering). */
 export function pickTier(prompt: string, agentType = ''): Tier {
   if (READ_ONLY_AGENTS.test(agentType)) return 'haiku'
-  if (OPUS_WORK.test(prompt)) return 'opus'
+  if (OPUS_WORK.test(prompt) || CONSULT.test(prompt)) return 'opus'
   if (READ_ONLY.test(prompt) && !WRITES.test(prompt)) return 'haiku'
   return 'sonnet'
 }
@@ -212,12 +232,16 @@ export function withTier(e: any): any {
   if (typeof e.prompt !== 'string' || e.prompt.length === 0) return e
   if (e.tool === 'Agent') {
     if (e.model || e.subagent_type === 'fork') return e
-    const t = pickTier(`${e.description ?? ''} ${e.prompt}`, e.subagent_type ?? '')
+    const text = `${e.description ?? ''} ${e.prompt}`
+    if (isConsult(text) && !READ_ONLY_AGENTS.test(e.subagent_type ?? '')) return { ...e, model: 'opus' }
+    const t = pickTier(text, e.subagent_type ?? '')
     return t === 'opus' ? e : { ...e, model: t }
   }
   if (e.tool === 'mcp__ccd_session__start_session') {
     if (e.model || e.context === 'fork' || e.target === 'cloud' || e.proposal_id) return e
-    const t = pickTier(`${e.title ?? ''} ${e.prompt}`)
+    const text = `${e.title ?? ''} ${e.prompt}`
+    if (isConsult(text)) return { ...e, model: SESSION_MODEL.opus }
+    const t = pickTier(text)
     return t === 'opus' ? e : { ...e, model: SESSION_MODEL[t] }
   }
   return e
@@ -289,6 +313,41 @@ export function caveSwitch(text: string): boolean | undefined {
 
 // Only she may switch it: not another session, a task notice or a plugin.
 const HERS = ['composer', 'bridge', 'sdk', 'projects-relay']
+
+// ---------- preferences ----------
+
+export const PREFS_REMINDER =
+  'OliviaOS: this looks like a correction or a preference from Olivia. If it is durable (not just for this task), ' +
+  'record it: what she wants · why · how to apply, in ~/.oliviaos/preferences.md (general) or project memory ' +
+  '(project-specific). Update an existing entry instead of adding a duplicate.'
+
+// Her words that usually carry a correction or a standing preference. Reminder only.
+const CORRECTION =
+  /(^\s*(no|nope|ei|not like that|wrong)\b[,.!]?)|\b(don'?t|do not|never|always|stop doing|i prefer|i'd rather|i would rather|prefer(ably)?|instead of|from now on|next time|i (don'?t|do not) (like|want)|that'?s not what)\b|(?<!\p{L})(älä|älkää|aina|ei koskaan|mieluummin|jatkossa|ensi kerralla|en halua)(?!\p{L})/iu
+
+/** True when her prompt looks like a correction or a standing preference. */
+export const looksLikeFeedback = (text: string) => text.length < 4000 && CORRECTION.test(text)
+
+const PREFS_MAX = 4000
+
+/** The system-prompt section for ~/.oliviaos/preferences.md, capped; '' when the file is missing or empty. */
+export function prefsSection(text: string): string {
+  const t = text.trim()
+  if (!t) return ''
+  const body = t.length > PREFS_MAX ? `${t.slice(0, PREFS_MAX)}\n\n[…cut; read the full file ~/.oliviaos/preferences.md]` : t
+  return `# Olivia's preferences (from ~/.oliviaos/preferences.md, loaded by oliviaos-guard)\n\n` +
+    'Act on these and say so in one line; do not ask again. Her explicit answers (my_answers) and current ' +
+    `instructions win over anything here.\n\n${body}`
+}
+
+async function loadPrefs($: EngineInterface): Promise<string> {
+  try {
+    const home = (await $.env.get('HOME')) ?? ''
+    return prefsSection(await $.fs.read(`${home}/.oliviaos/preferences.md`))
+  } catch {
+    return ''
+  }
+}
 
 // ---------- hooks ----------
 
@@ -419,11 +478,13 @@ export const register: Register = on => {
     turnLogged = 0
     turnBlocked = 0
     const origin = (e as any).origin?.kind
-    if (!e.isMeta && (origin === undefined || HERS.includes(origin))) {
+    const hers = !e.isMeta && (origin === undefined || HERS.includes(origin))
+    if (hers) {
       const to = caveSwitch(e.text)
       if (to !== undefined) await update($, caveman, () => to)
     }
     const add: string[] = []
+    if (hers && !e.command && looksLikeFeedback(e.text)) add.push(PREFS_REMINDER)
     // No network here: the names come from the plugin's own store.
     if (!e.isMeta && !e.command) {
       if (await read($, caveman)) add.push(CAVEMAN_REMINDER)
@@ -522,6 +583,8 @@ export const register: Register = on => {
     if (!rulesFromMcp && Date.now() - rulesTriedAt > 10_000) void loadRules($).then(t => { if (t) liveRules = t }).catch(() => {})
     const extra = [{ id: 'oliviaos-guard:autonomy', text: AUTONOMY, scope: 'session' as const }]
     if (liveRules) extra.push({ id: 'oliviaos-guard:rules', text: `# OliviaOS rules (live, from the OliviaOS skill's rules_get)\n\n${liveRules}`, scope: 'session' as const })
+    const prefs = await loadPrefs($)
+    if (prefs) extra.push({ id: 'oliviaos-guard:preferences', text: prefs, scope: 'session' as const })
     if (await read($, caveman)) extra.push({ id: 'oliviaos-guard:caveman', text: CAVEMAN, scope: 'session' as const })
     if (isNight(helsinkiHour())) extra.push({ id: 'oliviaos-guard:night', text: awakeNow() ? `${NIGHT} Olivia is chatting right now, so a plain factual question is fine; approvals still wait for the morning.` : NIGHT, scope: 'session' as const })
     return { ...r, sections: [...r.sections, ...extra] }
