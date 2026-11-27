@@ -1,7 +1,7 @@
 {
   "name": "oliviaos-guard",
-  "version": "0.10.0",
-  "description": "Enforces the OliviaOS Rule: blocks HARD STOPS, auto-logs state changes to decisions.md, carries the rule into every subagent and session brief.",
+  "version": "0.11.0",
+  "description": "Enforces the OliviaOS Rule: blocks HARD STOPS, auto-logs state changes to decisions.md, carries the rule into every subagent and session brief, sends permission prompts to the OliviaOS inbox and records classifier blocks.",
   "types": "./types/index.d.ts",
   "license": "MIT",
   "author": {
