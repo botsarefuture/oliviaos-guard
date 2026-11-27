@@ -472,7 +472,79 @@ async function flush($: EngineInterface) {
   await update($, pending, () => left.slice(-200))
 }
 
+/** One line naming a tool call, secrets redacted. */
+export function callLine(tool: string, input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>
+  const body = typeof i.command === 'string' ? i.command
+    : typeof i.file_path === 'string' ? i.file_path
+    : typeof i.url === 'string' ? i.url
+    : JSON.stringify(input ?? {})
+  return redact(`${tool}: ${body}`).replace(/\s+/g, ' ').slice(0, 300)
+}
+
+/**
+ * ask_olivia arguments for a permission prompt. A notice only: the guard never
+ * answers the prompt, and an answer in OliviaOS does not approve it.
+ */
+export function promptNotice(tool: string, input: unknown, project: string) {
+  const line = callLine(tool, input)
+  return {
+    question: `Approval waiting in Claude (${project || 'a session'}): ${line}`,
+    context: 'A Claude Code permission prompt is open. Approve or deny it in the Claude app or on your phone through Remote Control. If this step should never need you, add it to ~/.claude/settings.json autoMode.allow (scripts in ~/.oliviaos/scripts).',
+    default_action: 'The session waits at the prompt and keeps doing other work it can. Answering here does not approve the prompt.',
+    session: 'oliviaos-guard',
+    place: 'mac',
+    project,
+  }
+}
+
+const promptSeen = new Set<string>()
+
+async function forwardPrompt($: EngineInterface, tool: string, input: unknown) {
+  const project = cwd.split('/').filter(Boolean).pop() ?? ''
+  const key = `${project}|${callLine(tool, input)}`
+  if (promptSeen.has(key)) return
+  promptSeen.add(key)
+  if (promptSeen.size > 200) promptSeen.clear()
+  if (isNight(helsinkiHour())) {
+    // Night: no questions. It goes in the ~10:00 report instead.
+    const w = callLine(tool, input)
+    await record($, { title: `[prompt at night] ${w}`, what: w, cls: 'permission-prompt', revert: 'nothing ran', summary: `A permission prompt opened at night and waits in the Claude app: ${w}` })
+    return
+  }
+  const args = promptNotice(tool, input, project)
+  for (const server of await serversWith($, 'ask_olivia')) {
+    try {
+      const res = await $.mcp.call(server, 'ask_olivia', args)
+      if (!res.isError) return
+    } catch {}
+  }
+}
+
 export const register: Register = on => {
+  // 8: permission prompts go to the OliviaOS inbox; classifier blocks are recorded so
+  // settings.json can be fixed. Observe only: the guard never answers a prompt.
+  on('classic.PermissionRequest', async ($, e: any, next) => {
+    void forwardPrompt($, String(e.tool_name ?? ''), e.tool_input).catch(() => {})
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('classic.PermissionDenied', async ($, e: any, next) => {
+    const r = await next(e)
+    try {
+      const w = callLine(String(e.tool_name ?? ''), e.tool_input)
+      const reason = redact(String(e.reason ?? '')).slice(0, 500)
+      await record($, {
+        title: `[classifier block] ${w}`,
+        what: w,
+        cls: 'classifier-block',
+        revert: 'nothing ran',
+        summary: `Claude Code's auto-mode check blocked this call (not the guard). If the step is reversible and should not need Olivia, it belongs in ~/.claude/settings.json autoMode.allow.\n\nWhat: ${w}\n\nReason: ${reason}`,
+      })
+    } catch {}
+    return r
+  }).catch(($, e, next) => next(e))
+
   on('prompt.submit', async ($, e, next) => {
     lastPromptAt = Date.now()
     turnLogged = 0

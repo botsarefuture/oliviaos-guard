@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { caveSwitch, CAVEMAN_REMINDER, isPermissionAsk, boxVerdict, mentionsInfra, hostNames, INFRA_REMINDER, turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, questionVerdict as qv, isNight, isConsult, looksLikeFeedback, prefsSection, PREFS_REMINDER, AUTONOMY } from './register'
+import { caveSwitch, CAVEMAN_REMINDER, isPermissionAsk, boxVerdict, mentionsInfra, hostNames, INFRA_REMINDER, turnSummary, pickTier, withTier, hardStop, isStateChange, redact, withCarry, CARRY, reportArgs, promptNotice, callLine, questionVerdict as qv, isNight, isConsult, looksLikeFeedback, prefsSection, PREFS_REMINDER, AUTONOMY } from './register'
 
 const DAY = 14
 const NIGHT = 2
@@ -315,4 +315,16 @@ test('preferences section is capped and empty for a missing file', async () => {
   const big = prefsSection('x'.repeat(10000))
   expect(big.length < 4600).toBe(true)
   expect(big).toMatch(/full file/)
+})
+
+test('permission prompts become an inbox notice with secrets redacted', async () => {
+  const tok = '0123456789abcdef'.repeat(4)
+  const line = callLine('Bash', { command: `curl -H "Authorization: Bearer ${tok}" https://x` })
+  expect(line).not.toContain(tok)
+  expect(line.startsWith('Bash: curl')).toBe(true)
+  const n = promptNotice('Bash', { command: 'ls /tmp' }, 'olivia-os')
+  expect(n.question).toContain('ls /tmp')
+  expect(n.default_action.length > 0).toBe(true)
+  expect(n.project).toBe('olivia-os')
+  expect(callLine('Read', { file_path: '/x/y' })).toBe('Read: /x/y')
 })
